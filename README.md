@@ -77,7 +77,7 @@ npx vercel
 npx vercel --prod
 ```
 
-Redeploy after any code change. If you see `FUNCTION_INVOCATION_FAILED`, check **Deployments → Functions → Logs** in the Vercel dashboard.
+Redeploy after any code change. The Vercel entrypoint is root `app.py` (not Mangum). If you see `FUNCTION_INVOCATION_FAILED`, check **Deployments → Functions → Logs**.
 
 ### 3. Use it
 
