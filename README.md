@@ -73,11 +73,11 @@ Vercel runs the app as serverless functions. You need **shared storage** so the 
 ### 2. Deploy
 
 ```bash
-npm i -g vercel   # or: npx vercel
-cd location
-vercel
-vercel --prod
+npx vercel
+npx vercel --prod
 ```
+
+Redeploy after any code change. If you see `FUNCTION_INVOCATION_FAILED`, check **Deployments → Functions → Logs** in the Vercel dashboard.
 
 ### 3. Use it
 

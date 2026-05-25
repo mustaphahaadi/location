@@ -1,17 +1,13 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python"
-    }
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index" }
   ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "api/index.py"
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "location_server.py,blob_storage.py,location_consent.html,operator_dashboard.html"
     }
-  ],
+  },
   "env": {
     "USE_TUNNEL": "0",
     "LOCATION_STORAGE": "auto"

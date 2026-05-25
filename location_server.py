@@ -26,7 +26,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode, urlparse, urlunparse
 
-import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +43,9 @@ HOST = os.getenv("HOST", "0.0.0.0")
 TUNNEL = os.getenv("TUNNEL", "cloudflare").lower()
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 LOCATION_STORAGE = os.getenv("LOCATION_STORAGE", "auto").lower()
+IS_SERVERLESS = bool(
+    os.getenv("VERCEL") or os.getenv("VERCEL_ENV") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")
+)
 
 
 def detect_public_base_url() -> str:
@@ -195,14 +197,17 @@ def reload_store() -> None:
 
 def persist_store() -> None:
     kind = storage_kind()
-    if kind == "file":
-        DATA_FILE.write_text(json.dumps(location_store, indent=2))
-    elif kind == "kv":
-        _get_redis().set(KV_STORE_KEY, json.dumps(location_store))
-    elif kind == "blob":
-        from blob_storage import blob_put
+    try:
+        if kind == "file":
+            DATA_FILE.write_text(json.dumps(location_store, indent=2))
+        elif kind == "kv":
+            _get_redis().set(KV_STORE_KEY, json.dumps(location_store))
+        elif kind == "blob":
+            from blob_storage import blob_put
 
-        blob_put(json.dumps(location_store).encode())
+            blob_put(json.dumps(location_store).encode())
+    except Exception as exc:
+        print(f"[warn] persist_store ({kind}): {exc}")
 
 
 def load_store() -> None:
@@ -426,12 +431,17 @@ def append_query(url: str, extra: dict[str, str]) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_store()
-    if USE_TUNNEL and not PUBLIC_BASE_URL:
+    if not IS_SERVERLESS and USE_TUNNEL and not PUBLIC_BASE_URL:
         start_tunnel(PORT)
-    print_banner()
+    if not IS_SERVERLESS:
+        print_banner()
     yield
-    save_store()
-    stop_tunnel()
+    try:
+        save_store()
+    except Exception as exc:
+        print(f"[warn] save_store on shutdown: {exc}")
+    if not IS_SERVERLESS:
+        stop_tunnel()
 
 
 app = FastAPI(title="Location Consent Service", lifespan=lifespan)
@@ -614,5 +624,7 @@ def print_banner() -> None:
 
 
 if __name__ == "__main__":
+    import uvicorn
+
     reload = os.getenv("RELOAD", "0").lower() in ("1", "true", "yes")
     uvicorn.run("location_server:app", host=HOST, port=PORT, reload=reload)
