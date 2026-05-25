@@ -3,7 +3,7 @@
 Generate **HTTPS** location-sharing links for customers, collect GPS with explicit consent, and view results on an operator dashboard.
 
 - **Local:** `./run.sh` starts the server + Cloudflare tunnel (HTTPS on your phone).
-- **Internet:** Deploy with Docker to **VESSL**, **Render**, **Railway**, or any host — locations stay in an **in-memory cache** on the server (no database required).
+- **Internet:** Deploy to **Vercel** (recommended), **Render**, **Railway**, or Docker — locations stored in **Vercel KV** (cache) or in-memory on a single server.
 
 ## Quick start
 
@@ -50,7 +50,40 @@ sequenceDiagram
 
 Locally, data is saved to `locations.json`. When deployed, data is kept in **memory** (resets if the container restarts).
 
-## Deploy on the internet (VESSL / Docker)
+## Deploy on Vercel
+
+Vercel runs the app as serverless functions. Locations must use **Vercel KV** (a Redis cache — not a full database) so data is shared across requests.
+
+### 1. Create KV storage
+
+In the [Vercel dashboard](https://vercel.com): your project → **Storage** → **Create Database** → **KV** → connect it to the project.  
+Vercel injects `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically.
+
+### 2. Deploy
+
+```bash
+npm i -g vercel   # or: npx vercel
+cd location
+vercel
+vercel --prod
+```
+
+### 3. Use it
+
+- Operator dashboard: `https://YOUR-PROJECT.vercel.app/dashboard`
+- Generate a customer link from the dashboard (HTTPS — required for GPS on phones)
+- Locations appear on the dashboard after customers share
+
+`vercel.json` sets `USE_TUNNEL=0` and `LOCATION_STORAGE=kv`. Your production URL is detected from `VERCEL_PROJECT_PRODUCTION_URL`.
+
+### Local test (optional)
+
+```bash
+pip install -r requirements.txt
+vercel dev
+```
+
+## Deploy on the internet (Docker / other hosts)
 
 ### Docker (any cloud)
 
@@ -77,8 +110,10 @@ Connect the repo on [Render](https://render.com); `render.yaml` is included. Ren
 | Variable | Value |
 |----------|--------|
 | `USE_TUNNEL` | `0` |
-| `LOCATION_STORAGE` | `memory` |
+| `LOCATION_STORAGE` | `memory` (Docker) or `kv` (Vercel) |
 | `PUBLIC_BASE_URL` | Your HTTPS URL (optional if the platform sets a known env var) |
+
+On Vercel, link a **KV** store — `KV_REST_API_URL` / `KV_REST_API_TOKEN` are set automatically.
 
 ## API examples
 

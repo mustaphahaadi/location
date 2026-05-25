@@ -1,3 +1,5 @@
 fastapi>=0.110
 uvicorn>=0.27
 python-dotenv>=1.0
+mangum>=0.17
+upstash-redis>=1.0

@@ -51,17 +51,16 @@ def detect_public_base_url() -> str:
     candidates: list[str] = []
     for key in (
         "PUBLIC_BASE_URL",
+        "VERCEL_PROJECT_PRODUCTION_URL",
         "RENDER_EXTERNAL_URL",
         "RAILWAY_STATIC_URL",
         "RAILWAY_PUBLIC_DOMAIN",
         "VESSL_SERVICE_URL",
+        "VERCEL_URL",
     ):
         val = os.getenv(key, "").strip().rstrip("/")
         if val:
             candidates.append(val)
-    vercel = os.getenv("VERCEL_URL", "").strip()
-    if vercel:
-        candidates.append(vercel)
     fly = os.getenv("FLY_APP_NAME", "").strip()
     if fly:
         candidates.append(f"{fly}.fly.dev")
@@ -92,41 +91,102 @@ CLOUDFLARED_BIN = os.getenv("CLOUDFLARED_BIN", str(ROOT / "bin" / "cloudflared")
 location_store: dict[str, dict] = {}
 _tunnel_process: subprocess.Popen | None = None
 CF_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+KV_STORE_KEY = "location_consent:store"
+_redis_client = None
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def use_file_storage() -> bool:
-    """In-memory cache on deploy; optional JSON file when developing locally."""
-    if LOCATION_STORAGE == "memory":
+def kv_configured() -> bool:
+    return bool(os.getenv("KV_REST_API_URL") or os.getenv("UPSTASH_REDIS_REST_URL"))
+
+
+def use_kv_storage() -> bool:
+    if LOCATION_STORAGE == "kv":
+        return kv_configured()
+    if LOCATION_STORAGE in ("memory", "file"):
         return False
+    return kv_configured()
+
+
+def use_file_storage() -> bool:
+    """JSON file when developing locally with a tunnel."""
     if LOCATION_STORAGE == "file":
         return True
-    return USE_TUNNEL
+    if LOCATION_STORAGE in ("memory", "kv"):
+        return False
+    return USE_TUNNEL and not use_kv_storage()
+
+
+def storage_kind() -> str:
+    if use_file_storage():
+        return "file"
+    if use_kv_storage():
+        return "kv"
+    return "memory"
+
+
+def _get_redis():
+    global _redis_client
+    if _redis_client is None:
+        from upstash_redis import Redis
+
+        _redis_client = Redis.from_env()
+    return _redis_client
+
+
+def reload_store() -> None:
+    global location_store
+    kind = storage_kind()
+    if kind == "file":
+        if DATA_FILE.exists():
+            try:
+                raw = json.loads(DATA_FILE.read_text())
+                if isinstance(raw, dict):
+                    location_store = raw
+                elif isinstance(raw, list):
+                    location_store = {e["ref"]: e for e in raw if e.get("ref")}
+            except (json.JSONDecodeError, OSError) as exc:
+                print(f"[warn] Could not load {DATA_FILE.name}: {exc}")
+        return
+    if kind == "kv":
+        try:
+            raw = _get_redis().get(KV_STORE_KEY)
+            if not raw:
+                location_store = {}
+                return
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            location_store = parsed if isinstance(parsed, dict) else {}
+        except Exception as exc:
+            print(f"[warn] Could not load KV store: {exc}")
+            location_store = {}
+
+
+def persist_store() -> None:
+    kind = storage_kind()
+    if kind == "file":
+        DATA_FILE.write_text(json.dumps(location_store, indent=2))
+    elif kind == "kv":
+        _get_redis().set(KV_STORE_KEY, json.dumps(location_store))
 
 
 def load_store() -> None:
-    global location_store
-    if not use_file_storage():
-        print("[storage] In-memory cache (locations reset when the process restarts).")
-        return
-    if DATA_FILE.exists():
-        try:
-            raw = json.loads(DATA_FILE.read_text())
-            if isinstance(raw, dict):
-                location_store = raw
-            elif isinstance(raw, list):
-                location_store = {e["ref"]: e for e in raw if e.get("ref")}
-        except (json.JSONDecodeError, OSError) as exc:
-            print(f"[warn] Could not load {DATA_FILE.name}: {exc}")
+    reload_store()
+    kind = storage_kind()
+    if kind == "kv":
+        print("[storage] Vercel KV / Upstash cache.")
+    elif kind == "file":
+        print(f"[storage] Local file {DATA_FILE.name}.")
+    else:
+        print("[storage] In-memory cache (resets when the process restarts).")
 
 
 def save_store() -> None:
-    if not use_file_storage():
+    if storage_kind() == "memory":
         return
-    DATA_FILE.write_text(json.dumps(location_store, indent=2))
+    persist_store()
 
 
 def fetch_ngrok_public_url() -> str | None:
@@ -355,7 +415,8 @@ async def health():
         "status": "ok",
         "public_url": PUBLIC_BASE_URL or None,
         "stored_locations": len(location_store),
-        "storage": "file" if use_file_storage() else "memory",
+        "storage": storage_kind(),
+        "kv_configured": kv_configured(),
         "use_tunnel": USE_TUNNEL,
     }
 
@@ -370,7 +431,8 @@ async def tunnel_info():
         "public_url": url,
         "tunnel": TUNNEL,
         "use_tunnel": USE_TUNNEL,
-        "storage": "file" if use_file_storage() else "memory",
+        "storage": storage_kind(),
+        "kv_configured": kv_configured(),
         "auth_configured": ngrok_token_ok() if TUNNEL == "ngrok" else True,
         "deployed": bool(url) and not USE_TUNNEL,
     }
@@ -448,8 +510,9 @@ async def receive_location(request: Request):
     if lat is not None and lng is not None:
         entry["maps_url"] = f"https://www.google.com/maps?q={lat},{lng}"
 
+    reload_store()
     location_store[ref] = entry
-    save_store()
+    persist_store()
     print(f"\n[location received] {json.dumps(entry, indent=2)}\n")
 
     return JSONResponse({"status": "ok", "ref": ref, "maps_url": entry["maps_url"]})
@@ -457,6 +520,7 @@ async def receive_location(request: Request):
 
 @app.get("/location/{ref}")
 async def get_location(ref: str):
+    reload_store()
     entry = location_store.get(ref)
     if not entry:
         return JSONResponse({"error": f"No location for ref '{ref}'"}, status_code=404)
@@ -465,16 +529,18 @@ async def get_location(ref: str):
 
 @app.get("/locations")
 async def list_locations():
+    reload_store()
     items = sorted(location_store.values(), key=lambda x: x.get("received_at", ""), reverse=True)
     return JSONResponse({"count": len(items), "locations": items})
 
 
 @app.delete("/location/{ref}")
 async def delete_location(ref: str):
+    reload_store()
     if ref not in location_store:
         return JSONResponse({"error": "Not found"}, status_code=404)
     del location_store[ref]
-    save_store()
+    persist_store()
     return JSONResponse({"status": "deleted", "ref": ref})
 
 
@@ -487,7 +553,12 @@ def print_banner() -> None:
     else:
         public = "(set PUBLIC_BASE_URL or open via your host HTTPS URL)"
 
-    storage = f"{DATA_FILE.name} (disk)" if use_file_storage() else "in-memory cache"
+    storage_labels = {
+        "file": f"{DATA_FILE.name} (disk)",
+        "kv": "Vercel KV / Upstash cache",
+        "memory": "in-memory cache",
+    }
+    storage = storage_labels[storage_kind()]
 
     print("\n" + "═" * 52)
     print("  Location Consent Server")
