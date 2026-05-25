@@ -242,8 +242,14 @@
     const d = await r.json();
     const list = document.getElementById('locList');
     const items = d.locations || [];
+
+    if (d.storage === 'memory' && d.warning) {
+      list.innerHTML = `<li class="empty" style="color:#f5a623;line-height:1.5;">⚠️ ${d.warning}</li>`;
+      return;
+    }
+
     if (!items.length) {
-      list.innerHTML = '<li class="empty">No locations yet — send a link to a customer.</li>';
+      list.innerHTML = '<li class="empty">No locations yet — open your customer link, allow GPS, and tap the button to share.</li>';
       return;
     }
     list.innerHTML = items.map(loc => `

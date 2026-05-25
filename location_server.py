@@ -186,13 +186,31 @@ def reload_store() -> None:
         return
     if kind == "blob":
         try:
-            from blob_storage import blob_get
+            from blob_storage import blob_load_all
 
-            parsed = blob_get()
-            location_store = parsed if isinstance(parsed, dict) else {}
+            location_store = blob_load_all()
         except Exception as exc:
             print(f"[warn] Could not load Blob store: {exc}")
             location_store = {}
+
+
+def persist_entry(ref: str, entry: dict) -> str | None:
+    """Save one location. Returns an error message on failure, else None."""
+    kind = storage_kind()
+    try:
+        if kind == "file":
+            DATA_FILE.write_text(json.dumps(location_store, indent=2))
+        elif kind == "kv":
+            _get_redis().set(KV_STORE_KEY, json.dumps(location_store))
+        elif kind == "blob":
+            from blob_storage import blob_put_entry
+
+            blob_put_entry(ref, entry)
+        return None
+    except Exception as exc:
+        msg = f"{kind} save failed: {exc}"
+        print(f"[warn] persist_entry: {msg}")
+        return msg
 
 
 def persist_store() -> None:
@@ -203,11 +221,29 @@ def persist_store() -> None:
         elif kind == "kv":
             _get_redis().set(KV_STORE_KEY, json.dumps(location_store))
         elif kind == "blob":
-            from blob_storage import blob_put
+            from blob_storage import blob_put_entry
 
-            blob_put(json.dumps(location_store).encode())
+            for ref, entry in location_store.items():
+                blob_put_entry(ref, entry)
     except Exception as exc:
         print(f"[warn] persist_store ({kind}): {exc}")
+
+
+def delete_entry(ref: str) -> None:
+    if ref in location_store:
+        del location_store[ref]
+    kind = storage_kind()
+    if kind == "file":
+        persist_store()
+    elif kind == "kv":
+        persist_store()
+    elif kind == "blob":
+        try:
+            from blob_storage import blob_delete_entry
+
+            blob_delete_entry(ref)
+        except Exception as exc:
+            print(f"[warn] blob delete: {exc}")
 
 
 def load_store() -> None:
@@ -456,14 +492,20 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
+    reload_store()
+    kind = storage_kind()
+    warning = None
+    if IS_SERVERLESS and kind == "memory":
+        warning = "Connect Vercel Blob (Storage) or Upstash Redis — in-memory storage does not work on serverless."
     return {
-        "status": "ok",
+        "status": "ok" if not warning else "degraded",
         "public_url": PUBLIC_BASE_URL or None,
         "stored_locations": len(location_store),
-        "storage": storage_kind(),
+        "storage": kind,
         "kv_configured": kv_configured(),
         "blob_configured": blob_configured(),
         "use_tunnel": USE_TUNNEL,
+        "warning": warning,
     }
 
 
@@ -557,12 +599,29 @@ async def receive_location(request: Request):
     if lat is not None and lng is not None:
         entry["maps_url"] = f"https://www.google.com/maps?q={lat},{lng}"
 
+    kind = storage_kind()
+    if IS_SERVERLESS and kind == "memory":
+        return JSONResponse(
+            {
+                "error": "Storage not configured. In Vercel → Storage → create Blob and connect it to this project.",
+            },
+            status_code=503,
+        )
+
     reload_store()
     location_store[ref] = entry
-    persist_store()
+    err = persist_entry(ref, entry)
+    if err:
+        return JSONResponse({"error": err, "ref": ref}, status_code=500)
+
     print(f"\n[location received] {json.dumps(entry, indent=2)}\n")
 
-    return JSONResponse({"status": "ok", "ref": ref, "maps_url": entry["maps_url"]})
+    return JSONResponse({
+        "status": "ok",
+        "ref": ref,
+        "maps_url": entry["maps_url"],
+        "storage": kind,
+    })
 
 
 @app.get("/location/{ref}")
@@ -578,7 +637,16 @@ async def get_location(ref: str):
 async def list_locations():
     reload_store()
     items = sorted(location_store.values(), key=lambda x: x.get("received_at", ""), reverse=True)
-    return JSONResponse({"count": len(items), "locations": items})
+    kind = storage_kind()
+    warning = None
+    if IS_SERVERLESS and kind == "memory":
+        warning = "Connect Vercel Blob in Storage — locations cannot persist on serverless without it."
+    return JSONResponse({
+        "count": len(items),
+        "locations": items,
+        "storage": kind,
+        "warning": warning,
+    })
 
 
 @app.delete("/location/{ref}")
@@ -586,8 +654,7 @@ async def delete_location(ref: str):
     reload_store()
     if ref not in location_store:
         return JSONResponse({"error": "Not found"}, status_code=404)
-    del location_store[ref]
-    persist_store()
+    delete_entry(ref)
     return JSONResponse({"status": "deleted", "ref": ref})
 
 
