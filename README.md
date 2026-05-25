@@ -153,6 +153,7 @@ curl http://127.0.0.1:8000/locations
 | `ModuleNotFoundError: uvicorn` | Run `.venv/bin/python location_server.py` or `./run.sh` |
 | No public URL / tunnel badge yellow | Set `NGROK_AUTHTOKEN` in `.env`, run `ngrok config add-authtoken …` |
 | Customer GPS blocked | Link must be **HTTPS** (ngrok provides this) |
+| Locations not saved on Vercel | Connect **Blob** or **Upstash Redis** in Vercel Storage; memory cannot persist serverless submissions |
 | Port 8000 in use | `fuser -k 8000/tcp` then `./run.sh` again |
 
 ## Manual run (no run.sh)

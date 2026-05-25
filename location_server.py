@@ -149,6 +149,13 @@ def storage_kind() -> str:
     return "memory"
 
 
+def storage_warning() -> str | None:
+    kind = storage_kind()
+    if IS_SERVERLESS and kind == "memory":
+        return "Connect Vercel Blob (recommended) or Upstash Redis. In-memory storage does not work on serverless deployments."
+    return None
+
+
 def _get_redis():
     global _redis_client
     if _redis_client is None:
@@ -494,9 +501,7 @@ app.add_middleware(
 async def health():
     reload_store()
     kind = storage_kind()
-    warning = None
-    if IS_SERVERLESS and kind == "memory":
-        warning = "Connect Vercel Blob (Storage) or Upstash Redis — in-memory storage does not work on serverless."
+    warning = storage_warning()
     return {
         "status": "ok" if not warning else "degraded",
         "public_url": PUBLIC_BASE_URL or None,
@@ -555,6 +560,8 @@ async def generate_link(
 ):
     base = resolve_base_url(request)
     callback_url = append_query(f"{base}/receive", {"ref": ref} if ref else {})
+    kind = storage_kind()
+    warning = storage_warning()
 
     params = urlencode({
         "service": service,
@@ -569,6 +576,8 @@ async def generate_link(
         "service": service,
         "public_base": base,
         "callback": callback_url,
+        "storage": kind,
+        "warning": warning,
         "instructions": "Send this HTTPS link to the customer (SMS/WhatsApp). They tap Share and GPS is saved on your server.",
         "dashboard": f"{base}/dashboard",
         "view_location": f"{base}/location/{ref}" if ref else None,
@@ -600,10 +609,12 @@ async def receive_location(request: Request):
         entry["maps_url"] = f"https://www.google.com/maps?q={lat},{lng}"
 
     kind = storage_kind()
-    if IS_SERVERLESS and kind == "memory":
+    warning = storage_warning()
+    if warning:
         return JSONResponse(
             {
-                "error": "Storage not configured. In Vercel → Storage → create Blob and connect it to this project.",
+                "error": warning,
+                "storage": kind,
             },
             status_code=503,
         )

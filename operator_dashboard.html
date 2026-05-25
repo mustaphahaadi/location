@@ -27,6 +27,17 @@
   }
   h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem; }
   .sub { color: var(--muted); font-size: 0.875rem; margin-bottom: 1.5rem; }
+  .alert {
+    border: 1px solid rgba(245, 166, 35, 0.35);
+    background: rgba(245, 166, 35, 0.1);
+    color: #f7c77a;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin-bottom: 1rem;
+    display: none;
+  }
   .grid { display: grid; gap: 1.25rem; max-width: 960px; margin: 0 auto; }
   @media (min-width: 720px) {
     .grid-2 { grid-template-columns: 1fr 1fr; }
@@ -123,6 +134,7 @@
   <div>
     <h1>Location Link Generator</h1>
     <p class="sub">Create HTTPS links for customers. Locations appear below when they share.</p>
+    <div id="storageAlert" class="alert"></div>
     <div id="tunnelBadge" class="tunnel-badge off">Checking public URL…</div>
   </div>
 
@@ -191,10 +203,15 @@
 
   async function refreshTunnel() {
     try {
-      const r = await apiFetch('/api/tunnel');
-      const d = await r.json();
+      const [tunnelResponse, healthResponse] = await Promise.all([
+        apiFetch('/api/tunnel'),
+        apiFetch('/health'),
+      ]);
+      const d = await tunnelResponse.json();
+      const health = await healthResponse.json();
       const badge = document.getElementById('tunnelBadge');
       const pub = document.getElementById('publicUrl');
+      const alert = document.getElementById('storageAlert');
       const url = d.public_url || pagePublicBase();
       if (url) {
         badge.className = 'tunnel-badge';
@@ -204,6 +221,13 @@
         badge.className = 'tunnel-badge off';
         badge.textContent = '○ No public URL — run ./run.sh or deploy';
         pub.textContent = 'Not available yet';
+      }
+      if (health.warning) {
+        alert.style.display = 'block';
+        alert.textContent = health.warning;
+      } else {
+        alert.style.display = 'none';
+        alert.textContent = '';
       }
     } catch (e) {
       document.getElementById('tunnelBadge').textContent = 'Server unreachable';
@@ -218,12 +242,17 @@
     const d = await r.json();
     currentLink = d.link;
     document.getElementById('linkOut').textContent = d.link;
+    const alert = document.getElementById('storageAlert');
     const base = d.public_base || pagePublicBase();
     if (base) {
       document.getElementById('publicUrl').textContent = base;
       document.getElementById('tunnelBadge').className = 'tunnel-badge';
       document.getElementById('tunnelBadge').textContent = d.public_base && !d.use_tunnel
         ? '● Deployed (HTTPS)' : '● Public URL ready';
+    }
+    if (d.warning) {
+      alert.style.display = 'block';
+      alert.textContent = d.warning;
     }
     toast('Link generated');
   }

@@ -132,7 +132,7 @@ No pressure, just good vibes, practice, creativity, and growth. Bring your board
   <div class="status" id="status"></div>
 
   <p class="consent-note">
-    Link will be sent to your Telegram chat.
+    If you opened this inside Telegram or WhatsApp, use Safari or Chrome if the location prompt does not appear.
   </p>
 </div>
 
@@ -179,8 +179,7 @@ No pressure, just good vibes, practice, creativity, and growth. Bring your board
     }
 
     if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-      showError('This page must be opened over HTTPS for GPS to work. Ask your provider for a secure link.');
-      return;
+      status.textContent = 'This browser is not reporting a secure context. If the prompt does not appear, open the link in Safari or Chrome.';
     }
 
     btn.innerHTML = '<span class="spinner"></span> Waiting for permission…';
