@@ -1,0 +1,7 @@
+.venv
+.env
+locations.json
+bin/
+__pycache__
+*.pyc
+.git

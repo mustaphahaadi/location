@@ -122,8 +122,8 @@
 <div class="grid">
   <div>
     <h1>Location Link Generator</h1>
-    <p class="sub">Create HTTPS links for customers via ngrok. Locations appear below when they share.</p>
-    <div id="tunnelBadge" class="tunnel-badge off">Checking tunnel…</div>
+    <p class="sub">Create HTTPS links for customers. Locations appear below when they share.</p>
+    <div id="tunnelBadge" class="tunnel-badge off">Checking public URL…</div>
   </div>
 
   <div class="grid grid-2">
@@ -145,9 +145,10 @@
     </div>
 
     <div class="card">
-      <h2>Tunnel status</h2>
+      <h2>Public URL</h2>
       <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem;">
-        Customers need HTTPS for GPS. Cloudflare Tunnel is used by default (no ngrok warning page).
+        Customers need HTTPS for GPS. When deployed (VESSL, Render, Railway, etc.) this is your live site URL.
+        Locally, <code>./run.sh</code> starts a Cloudflare tunnel.
       </p>
       <div class="link-box" id="publicUrl">—</div>
       <button class="btn btn-ghost" onclick="refreshTunnel()">Refresh</button>
@@ -181,19 +182,27 @@
     return fetch(url, { ...options, headers });
   }
 
+  function pagePublicBase() {
+    if (location.protocol === 'https:' && !location.hostname.match(/^(localhost|127\.0\.0\.1)$/)) {
+      return location.origin;
+    }
+    return null;
+  }
+
   async function refreshTunnel() {
     try {
       const r = await apiFetch('/api/tunnel');
       const d = await r.json();
       const badge = document.getElementById('tunnelBadge');
       const pub = document.getElementById('publicUrl');
-      if (d.public_url) {
+      const url = d.public_url || pagePublicBase();
+      if (url) {
         badge.className = 'tunnel-badge';
-        badge.textContent = '● Tunnel active (HTTPS)';
-        pub.textContent = d.public_url;
+        badge.textContent = d.deployed ? '● Deployed (HTTPS)' : '● Public URL ready (HTTPS)';
+        pub.textContent = url;
       } else {
         badge.className = 'tunnel-badge off';
-        badge.textContent = '○ No public tunnel — run ./run.sh';
+        badge.textContent = '○ No public URL — run ./run.sh or deploy';
         pub.textContent = 'Not available yet';
       }
     } catch (e) {
@@ -209,10 +218,12 @@
     const d = await r.json();
     currentLink = d.link;
     document.getElementById('linkOut').textContent = d.link;
-    if (d.public_base) {
-      document.getElementById('publicUrl').textContent = d.public_base;
+    const base = d.public_base || pagePublicBase();
+    if (base) {
+      document.getElementById('publicUrl').textContent = base;
       document.getElementById('tunnelBadge').className = 'tunnel-badge';
-      document.getElementById('tunnelBadge').textContent = '● Public URL ready';
+      document.getElementById('tunnelBadge').textContent = d.public_base && !d.use_tunnel
+        ? '● Deployed (HTTPS)' : '● Public URL ready';
     }
     toast('Link generated');
   }

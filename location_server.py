@@ -42,8 +42,49 @@ DATA_FILE = ROOT / "locations.json"
 PORT = int(os.getenv("PORT", "8000"))
 HOST = os.getenv("HOST", "0.0.0.0")
 TUNNEL = os.getenv("TUNNEL", "cloudflare").lower()
-USE_TUNNEL = os.getenv("USE_TUNNEL", os.getenv("USE_NGROK", "1")).lower() in ("1", "true", "yes")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+LOCATION_STORAGE = os.getenv("LOCATION_STORAGE", "auto").lower()
+
+
+def detect_public_base_url() -> str:
+    """Infer HTTPS base URL from common hosting platform env vars."""
+    candidates: list[str] = []
+    for key in (
+        "PUBLIC_BASE_URL",
+        "RENDER_EXTERNAL_URL",
+        "RAILWAY_STATIC_URL",
+        "RAILWAY_PUBLIC_DOMAIN",
+        "VESSL_SERVICE_URL",
+    ):
+        val = os.getenv(key, "").strip().rstrip("/")
+        if val:
+            candidates.append(val)
+    vercel = os.getenv("VERCEL_URL", "").strip()
+    if vercel:
+        candidates.append(vercel)
+    fly = os.getenv("FLY_APP_NAME", "").strip()
+    if fly:
+        candidates.append(f"{fly}.fly.dev")
+
+    for raw in candidates:
+        if not raw:
+            continue
+        if raw.startswith("http://") or raw.startswith("https://"):
+            return raw.rstrip("/")
+        return f"https://{raw}"
+    return ""
+
+
+_detected_public = detect_public_base_url()
+if _detected_public and not PUBLIC_BASE_URL:
+    PUBLIC_BASE_URL = _detected_public
+
+_use_tunnel_env = os.getenv("USE_TUNNEL", os.getenv("USE_NGROK", "")).strip().lower()
+if _use_tunnel_env:
+    USE_TUNNEL = _use_tunnel_env in ("1", "true", "yes")
+else:
+    # Deployed with a stable public URL: no local cloudflared/ngrok process.
+    USE_TUNNEL = not bool(PUBLIC_BASE_URL)
 NGROK_BIN = os.getenv("NGROK_BIN", "ngrok")
 NGROK_AUTHTOKEN = os.getenv("NGROK_AUTHTOKEN", "").strip()
 CLOUDFLARED_BIN = os.getenv("CLOUDFLARED_BIN", str(ROOT / "bin" / "cloudflared") if (ROOT / "bin" / "cloudflared").exists() else "cloudflared")
@@ -57,8 +98,20 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def use_file_storage() -> bool:
+    """In-memory cache on deploy; optional JSON file when developing locally."""
+    if LOCATION_STORAGE == "memory":
+        return False
+    if LOCATION_STORAGE == "file":
+        return True
+    return USE_TUNNEL
+
+
 def load_store() -> None:
     global location_store
+    if not use_file_storage():
+        print("[storage] In-memory cache (locations reset when the process restarts).")
+        return
     if DATA_FILE.exists():
         try:
             raw = json.loads(DATA_FILE.read_text())
@@ -71,6 +124,8 @@ def load_store() -> None:
 
 
 def save_store() -> None:
+    if not use_file_storage():
+        return
     DATA_FILE.write_text(json.dumps(location_store, indent=2))
 
 
@@ -247,12 +302,19 @@ def resolve_base_url(request: Request) -> str:
     if forwarded_proto and forwarded_host:
         return f"{forwarded_proto}://{forwarded_host}".rstrip("/")
 
+    host = request.headers.get("host", "")
     base = str(request.base_url).rstrip("/")
-    if base.startswith("http://") and (
-        request.headers.get("host", "").endswith(".ngrok-free.app")
-        or request.headers.get("host", "").endswith(".trycloudflare.com")
-    ):
-        return "https://" + request.headers["host"]
+    https_hosts = (
+        ".ngrok-free.app",
+        ".trycloudflare.com",
+        ".vessl.ai",
+        ".onrender.com",
+        ".railway.app",
+        ".fly.dev",
+        ".vercel.app",
+    )
+    if base.startswith("http://") and any(host.endswith(suffix) for suffix in https_hosts):
+        return "https://" + host
     return base
 
 
@@ -293,6 +355,8 @@ async def health():
         "status": "ok",
         "public_url": PUBLIC_BASE_URL or None,
         "stored_locations": len(location_store),
+        "storage": "file" if use_file_storage() else "memory",
+        "use_tunnel": USE_TUNNEL,
     }
 
 
@@ -306,7 +370,9 @@ async def tunnel_info():
         "public_url": url,
         "tunnel": TUNNEL,
         "use_tunnel": USE_TUNNEL,
+        "storage": "file" if use_file_storage() else "memory",
         "auth_configured": ngrok_token_ok() if TUNNEL == "ngrok" else True,
+        "deployed": bool(url) and not USE_TUNNEL,
     }
 
 
@@ -414,18 +480,27 @@ async def delete_location(ref: str):
 
 def print_banner() -> None:
     local = f"http://127.0.0.1:{PORT}"
-    public = PUBLIC_BASE_URL or f"(start tunnel — TUNNEL={TUNNEL} in .env)"
+    if PUBLIC_BASE_URL:
+        public = PUBLIC_BASE_URL
+    elif USE_TUNNEL:
+        public = f"(starting tunnel — TUNNEL={TUNNEL})"
+    else:
+        public = "(set PUBLIC_BASE_URL or open via your host HTTPS URL)"
+
+    storage = f"{DATA_FILE.name} (disk)" if use_file_storage() else "in-memory cache"
 
     print("\n" + "═" * 52)
     print("  Location Consent Server")
     print("═" * 52)
-    print(f"  Tunnel provider     : {TUNNEL}")
+    print(f"  Mode               : {'local + tunnel' if USE_TUNNEL else 'deployed (HTTPS)'}")
+    if USE_TUNNEL:
+        print(f"  Tunnel provider    : {TUNNEL}")
+    print(f"  Storage            : {storage}")
     print(f"  Operator dashboard : {local}/dashboard")
     print(f"  Generate link API  : {local}/link?service=My+Co&ref=JOB-001")
     print(f"  Public URL (share) : {public}")
     if PUBLIC_BASE_URL:
         print(f"  Customer link      : {PUBLIC_BASE_URL}/link?service=My+Co&ref=JOB-001")
-    print(f"  Stored data file   : {DATA_FILE.name}")
     print("═" * 52 + "\n")
 
 

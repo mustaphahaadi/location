@@ -1,0 +1,14 @@
+# https://render.com — connect repo and deploy as a Web Service
+services:
+  - type: web
+    name: location-consent
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: USE_TUNNEL
+        value: "0"
+      - key: LOCATION_STORAGE
+        value: memory
+      - key: PORT
+        value: "8000"

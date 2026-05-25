@@ -1,6 +1,9 @@
 # Location Consent Service
 
-Generate **HTTPS** location-sharing links for customers, collect GPS with explicit consent, and view results on an operator dashboard. Uses **ngrok** so links work on real phones (not just localhost).
+Generate **HTTPS** location-sharing links for customers, collect GPS with explicit consent, and view results on an operator dashboard.
+
+- **Local:** `./run.sh` starts the server + Cloudflare tunnel (HTTPS on your phone).
+- **Internet:** Deploy with Docker to **VESSL**, **Render**, **Railway**, or any host — locations stay in an **in-memory cache** on the server (no database required).
 
 ## Quick start
 
@@ -45,7 +48,37 @@ sequenceDiagram
 | `/location/{ref}` | Lookup one job by reference |
 | `/locations` | List all captured locations |
 
-Data is saved to `locations.json` automatically.
+Locally, data is saved to `locations.json`. When deployed, data is kept in **memory** (resets if the container restarts).
+
+## Deploy on the internet (VESSL / Docker)
+
+### Docker (any cloud)
+
+```bash
+docker build -t location-consent .
+docker run -p 8000:8000 -e PUBLIC_BASE_URL=https://your-domain.com location-consent
+```
+
+Set `PUBLIC_BASE_URL` to your public HTTPS URL so generated customer links use the right host.
+
+### VESSL AI
+
+1. Build and push the image from this repo (`Dockerfile` is included).
+2. Edit `vessl-service.yaml` — set `image:` to your registry image and `resources.cluster` to your cluster.
+3. Deploy: `vessl service create -f vessl-service.yaml`
+4. Open the HTTPS endpoint from the VESSL console → `/dashboard`
+
+### Render
+
+Connect the repo on [Render](https://render.com); `render.yaml` is included. Render sets `RENDER_EXTERNAL_URL` automatically.
+
+### Environment (deployed)
+
+| Variable | Value |
+|----------|--------|
+| `USE_TUNNEL` | `0` |
+| `LOCATION_STORAGE` | `memory` |
+| `PUBLIC_BASE_URL` | Your HTTPS URL (optional if the platform sets a known env var) |
 
 ## API examples
 

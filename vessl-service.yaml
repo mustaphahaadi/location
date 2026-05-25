@@ -1,0 +1,41 @@
+# VESSL AI — deploy with Docker (recommended)
+#
+#   docker build -t YOUR_REGISTRY/location-consent:latest .
+#   docker push YOUR_REGISTRY/location-consent:latest
+#   # Edit image: below, then:
+#   vessl service create -f vessl-service.yaml
+#
+# In the VESSL console, copy your service HTTPS endpoint and set:
+#   PUBLIC_BASE_URL=https://your-service-xxxxx.vessl.ai
+# (VESSL may inject VESSL_SERVICE_URL automatically on some clusters.)
+
+name: location-consent
+message: Location consent — shareable GPS links + operator dashboard
+
+image: YOUR_REGISTRY/location-consent:latest
+
+resources:
+  cluster: vessl-oci-sanjose
+  preset: cpu-small
+
+run: python -m uvicorn location_server:app --host 0.0.0.0 --port 8000
+
+ports:
+  - port: 8000
+
+service:
+  expose: 8000
+  monitoring:
+    - port: 8000
+      path: /health
+  autoscaling:
+    min: 1
+    max: 2
+    metric: cpu
+    target: 60
+
+env:
+  USE_TUNNEL: "0"
+  LOCATION_STORAGE: memory
+  HOST: "0.0.0.0"
+  PORT: "8000"
