@@ -14,6 +14,6 @@
   ],
   "env": {
     "USE_TUNNEL": "0",
-    "LOCATION_STORAGE": "kv"
+    "LOCATION_STORAGE": "auto"
   }
 }

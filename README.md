@@ -52,12 +52,23 @@ Locally, data is saved to `locations.json`. When deployed, data is kept in **mem
 
 ## Deploy on Vercel
 
-Vercel runs the app as serverless functions. Locations must use **Vercel KV** (a Redis cache — not a full database) so data is shared across requests.
+Vercel runs the app as serverless functions. You need **shared storage** so the dashboard and customer submissions see the same data.
 
-### 1. Create KV storage
+> **Note:** Vercel removed built-in “KV”. Your storage options are **Blob**, **Edge Config**, or **Marketplace** providers.
 
-In the [Vercel dashboard](https://vercel.com): your project → **Storage** → **Create Database** → **KV** → connect it to the project.  
-Vercel injects `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically.
+| Option | Use for locations? |
+|--------|-------------------|
+| **Blob** | **Yes — recommended.** Stores `locations.json` in object storage. |
+| **Marketplace → Upstash Redis** | **Yes.** Redis cache (same as old KV). |
+| **Edge Config** | **No.** Meant for feature flags; writes are slow. |
+
+### 1. Create Blob storage (recommended)
+
+1. [Vercel dashboard](https://vercel.com) → your project → **Storage** → **Browse Storage**
+2. Choose **Blob** → **Create** → connect to your project  
+3. Vercel injects `BLOB_READ_WRITE_TOKEN` automatically
+
+**Alternative:** scroll to **Marketplace Database Providers** → add **Upstash Redis** → that sets `KV_REST_API_URL` / `KV_REST_API_TOKEN`.
 
 ### 2. Deploy
 
@@ -74,7 +85,7 @@ vercel --prod
 - Generate a customer link from the dashboard (HTTPS — required for GPS on phones)
 - Locations appear on the dashboard after customers share
 
-`vercel.json` sets `USE_TUNNEL=0` and `LOCATION_STORAGE=kv`. Your production URL is detected from `VERCEL_PROJECT_PRODUCTION_URL`.
+`vercel.json` sets `USE_TUNNEL=0` and `LOCATION_STORAGE=auto` (Blob if connected, else Upstash). Your production URL is detected from `VERCEL_PROJECT_PRODUCTION_URL`.
 
 ### Local test (optional)
 
@@ -110,10 +121,10 @@ Connect the repo on [Render](https://render.com); `render.yaml` is included. Ren
 | Variable | Value |
 |----------|--------|
 | `USE_TUNNEL` | `0` |
-| `LOCATION_STORAGE` | `memory` (Docker) or `kv` (Vercel) |
+| `LOCATION_STORAGE` | `auto` (Vercel), `memory` (Docker) |
 | `PUBLIC_BASE_URL` | Your HTTPS URL (optional if the platform sets a known env var) |
 
-On Vercel, link a **KV** store — `KV_REST_API_URL` / `KV_REST_API_TOKEN` are set automatically.
+On Vercel, connect **Blob** (`BLOB_READ_WRITE_TOKEN`) or **Upstash Redis** from the Marketplace.
 
 ## API examples
 

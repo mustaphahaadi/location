@@ -103,21 +103,38 @@ def kv_configured() -> bool:
     return bool(os.getenv("KV_REST_API_URL") or os.getenv("UPSTASH_REDIS_REST_URL"))
 
 
+def blob_configured() -> bool:
+    from blob_storage import blob_configured as _blob_ok
+
+    return _blob_ok()
+
+
 def use_kv_storage() -> bool:
     if LOCATION_STORAGE == "kv":
         return kv_configured()
-    if LOCATION_STORAGE in ("memory", "file"):
+    if LOCATION_STORAGE in ("memory", "file", "blob"):
         return False
     return kv_configured()
+
+
+def use_blob_storage() -> bool:
+    if LOCATION_STORAGE == "blob":
+        return blob_configured()
+    if LOCATION_STORAGE in ("memory", "file", "kv"):
+        return False
+    # auto: prefer Blob on Vercel (native storage), else Upstash from Marketplace
+    if blob_configured():
+        return True
+    return False
 
 
 def use_file_storage() -> bool:
     """JSON file when developing locally with a tunnel."""
     if LOCATION_STORAGE == "file":
         return True
-    if LOCATION_STORAGE in ("memory", "kv"):
+    if LOCATION_STORAGE in ("memory", "kv", "blob"):
         return False
-    return USE_TUNNEL and not use_kv_storage()
+    return USE_TUNNEL and not use_kv_storage() and not use_blob_storage()
 
 
 def storage_kind() -> str:
@@ -125,6 +142,8 @@ def storage_kind() -> str:
         return "file"
     if use_kv_storage():
         return "kv"
+    if use_blob_storage():
+        return "blob"
     return "memory"
 
 
@@ -162,6 +181,16 @@ def reload_store() -> None:
         except Exception as exc:
             print(f"[warn] Could not load KV store: {exc}")
             location_store = {}
+        return
+    if kind == "blob":
+        try:
+            from blob_storage import blob_get
+
+            parsed = blob_get()
+            location_store = parsed if isinstance(parsed, dict) else {}
+        except Exception as exc:
+            print(f"[warn] Could not load Blob store: {exc}")
+            location_store = {}
 
 
 def persist_store() -> None:
@@ -170,13 +199,19 @@ def persist_store() -> None:
         DATA_FILE.write_text(json.dumps(location_store, indent=2))
     elif kind == "kv":
         _get_redis().set(KV_STORE_KEY, json.dumps(location_store))
+    elif kind == "blob":
+        from blob_storage import blob_put
+
+        blob_put(json.dumps(location_store).encode())
 
 
 def load_store() -> None:
     reload_store()
     kind = storage_kind()
     if kind == "kv":
-        print("[storage] Vercel KV / Upstash cache.")
+        print("[storage] Upstash Redis (Marketplace).")
+    elif kind == "blob":
+        print("[storage] Vercel Blob store.")
     elif kind == "file":
         print(f"[storage] Local file {DATA_FILE.name}.")
     else:
@@ -417,6 +452,7 @@ async def health():
         "stored_locations": len(location_store),
         "storage": storage_kind(),
         "kv_configured": kv_configured(),
+        "blob_configured": blob_configured(),
         "use_tunnel": USE_TUNNEL,
     }
 
@@ -433,6 +469,7 @@ async def tunnel_info():
         "use_tunnel": USE_TUNNEL,
         "storage": storage_kind(),
         "kv_configured": kv_configured(),
+        "blob_configured": blob_configured(),
         "auth_configured": ngrok_token_ok() if TUNNEL == "ngrok" else True,
         "deployed": bool(url) and not USE_TUNNEL,
     }
@@ -555,7 +592,8 @@ def print_banner() -> None:
 
     storage_labels = {
         "file": f"{DATA_FILE.name} (disk)",
-        "kv": "Vercel KV / Upstash cache",
+        "kv": "Upstash Redis (Marketplace)",
+        "blob": "Vercel Blob store",
         "memory": "in-memory cache",
     }
     storage = storage_labels[storage_kind()]
